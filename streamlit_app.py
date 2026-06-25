@@ -222,19 +222,19 @@ body = [
 ]
 
 bd = "border-bottom:0.5px solid rgba(128,128,128,0.25);"
-html = "<table style='width:100%; border-collapse:collapse; font-size:14px; color:inherit;'>"
+html = "<table style='width:100%; border-collapse:collapse; font-size:13px; color:inherit;'>"
 html += "<thead><tr style='color:rgba(128,128,128,0.95); text-align:right;'>"
 for i, h in enumerate(headers):
     align = "left" if i == 0 else "right"
-    html += f"<th style='padding:8px 10px; text-align:{align}; font-weight:500; {bd}'>{h}</th>"
+    html += f"<th style='padding:4px 10px; text-align:{align}; font-weight:500; {bd}'>{h}</th>"
 html += "</tr></thead><tbody>"
 for name, vals, is_total in body:
     weight = "700" if is_total else "400"
     top = "border-top:1.5px solid rgba(128,128,128,0.45);" if is_total else ""
     html += f"<tr style='{top}'>"
-    html += f"<td style='padding:9px 10px; text-align:left; font-weight:{weight}; {bd}'>{name}</td>"
+    html += f"<td style='padding:5px 10px; text-align:left; font-weight:{weight}; {bd}'>{name}</td>"
     for v in vals:
-        html += f"<td style='padding:9px 10px; text-align:right; font-weight:{weight}; {bd}'>{v}</td>"
+        html += f"<td style='padding:5px 10px; text-align:right; font-weight:{weight}; {bd}'>{v}</td>"
     html += "</tr>"
 html += "</tbody></table>"
 st.markdown(html, unsafe_allow_html=True)
