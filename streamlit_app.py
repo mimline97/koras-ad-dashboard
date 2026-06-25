@@ -187,24 +187,6 @@ prev = agg(f_prev)
 st.markdown("### 📊 통합 (구글 + 메타)")
 st.caption(f"기간 {start} ~ {end}")
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("조회·도달", f"{cur['views']:,}", delta_str(cur["views"], prev["views"]))
-c2.metric("클릭수", f"{cur['clicks']:,}", delta_str(cur["clicks"], prev["clicks"]))
-c3.metric("전환수", f"{cur['conversions']:,}", delta_str(cur["conversions"], prev["conversions"]))
-c4.metric("노출수", f"{cur['impressions']:,}", delta_str(cur["impressions"], prev["impressions"]))
-
-t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
-t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
-st.caption(f"비용 {cur['cost']:,.0f}원   ·   CTR {t_ctr:.2f}%   ·   CPC {t_cpc:,.0f}원")
-st.caption("※ '조회·도달'은 구글 조회수 + 메타 도달의 합이에요(성격이 다른 값이라 참고용).")
-
-st.divider()
-
-# ========================================================
-#  플랫폼별 상세 표 (구글 / 메타 / 총계)  — 총계 볼드
-# ========================================================
-st.markdown("#### 플랫폼별 상세")
-
 
 def cells(d):
     a = agg(d)
@@ -214,31 +196,46 @@ def cells(d):
             f"{a['impressions']:,}", f"{a['cost']:,.0f}원", f"{ctr:.2f}%", f"{cpc:,.0f}원"]
 
 
-headers = ["구분", "조회·도달", "클릭", "전환", "노출", "비용", "CTR", "CPC"]
-body = [
-    ("구글", cells(f[f["platform"] == "google"]), False),
-    ("메타", cells(f[f["platform"] == "meta"]), False),
-    ("총계", cells(f), True),
-]
+# ----- 좌(통합 카드) / 우(플랫폼별 표) 2단 -----
+left, right = st.columns([1, 1.1], gap="large")
 
-bd = "border-bottom:0.5px solid rgba(128,128,128,0.25);"
-html = "<table style='width:100%; border-collapse:collapse; font-size:13px; color:inherit;'>"
-html += "<thead><tr style='color:rgba(128,128,128,0.95); text-align:right;'>"
-for i, h in enumerate(headers):
-    align = "left" if i == 0 else "right"
-    html += f"<th style='padding:4px 10px; text-align:{align}; font-weight:500; {bd}'>{h}</th>"
-html += "</tr></thead><tbody>"
-for name, vals, is_total in body:
-    weight = "700" if is_total else "400"
-    top = "border-top:1.5px solid rgba(128,128,128,0.45);" if is_total else ""
-    html += f"<tr style='{top}'>"
-    html += f"<td style='padding:5px 10px; text-align:left; font-weight:{weight}; {bd}'>{name}</td>"
-    for v in vals:
-        html += f"<td style='padding:5px 10px; text-align:right; font-weight:{weight}; {bd}'>{v}</td>"
-    html += "</tr>"
-html += "</tbody></table>"
-st.markdown(html, unsafe_allow_html=True)
+with left:
+    m1, m2 = st.columns(2)
+    m1.metric("조회·도달", f"{cur['views']:,}", delta_str(cur["views"], prev["views"]))
+    m2.metric("클릭수", f"{cur['clicks']:,}", delta_str(cur["clicks"], prev["clicks"]))
+    m3, m4 = st.columns(2)
+    m3.metric("전환수", f"{cur['conversions']:,}", delta_str(cur["conversions"], prev["conversions"]))
+    m4.metric("노출수", f"{cur['impressions']:,}", delta_str(cur["impressions"], prev["impressions"]))
+    t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
+    t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
+    st.caption(f"비용 {cur['cost']:,.0f}원 · CTR {t_ctr:.2f}% · CPC {t_cpc:,.0f}원")
 
+with right:
+    headers = ["구분", "조회·도달", "클릭", "전환", "노출", "비용", "CTR", "CPC"]
+    body = [
+        ("구글", cells(f[f["platform"] == "google"]), False),
+        ("메타", cells(f[f["platform"] == "meta"]), False),
+        ("총계", cells(f), True),
+    ]
+    bd = "border-bottom:0.5px solid rgba(128,128,128,0.25);"
+    html = "<table style='width:100%; border-collapse:collapse; font-size:12px; color:inherit;'>"
+    html += "<thead><tr style='color:rgba(128,128,128,0.95);'>"
+    for i, h in enumerate(headers):
+        align = "left" if i == 0 else "right"
+        html += f"<th style='padding:4px 6px; text-align:{align}; font-weight:500; {bd}'>{h}</th>"
+    html += "</tr></thead><tbody>"
+    for name, vals, is_total in body:
+        weight = "700" if is_total else "400"
+        top = "border-top:1.5px solid rgba(128,128,128,0.45);" if is_total else ""
+        html += f"<tr style='{top}'>"
+        html += f"<td style='padding:5px 6px; text-align:left; font-weight:{weight}; {bd}'>{name}</td>"
+        for v in vals:
+            html += f"<td style='padding:5px 6px; text-align:right; font-weight:{weight}; {bd}'>{v}</td>"
+        html += "</tr>"
+    html += "</tbody></table>"
+    st.markdown(html, unsafe_allow_html=True)
+
+st.caption("※ '조회·도달'은 구글 조회수 + 메타 도달의 합이에요(성격이 다른 값이라 참고용).")
 st.divider()
 
 # ========================================================
