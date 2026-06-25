@@ -6,12 +6,37 @@ import streamlit as st
 
 st.set_page_config(page_title="Koras 광고 대시보드", layout="wide")
 
-# ---- 여백 줄이기 + 통합 숫자 볼드 ----
+# ---- 디자인 (코라스 파랑 톤) ----
+BLUE = "#2563EB"
 st.markdown("""
 <style>
-.block-container {padding-top: 2.2rem; padding-bottom: 2rem;}
-[data-testid="stMetricValue"] {font-weight: 700;}
-hr {margin: 0.7rem 0;}
+.block-container {padding-top: 2.0rem; padding-bottom: 2.5rem; max-width: 1200px;}
+hr {margin: 1.1rem 0;}
+#MainMenu, footer {visibility: hidden;}
+.k-tag {display:inline-flex; align-items:center; gap:6px; font-size:11px; letter-spacing:0.08em;
+        font-weight:500; color:#2563EB; background:rgba(37,99,235,0.10);
+        padding:4px 10px; border-radius:999px; margin-bottom:8px;}
+.k-h1 {font-size:23px; font-weight:700; line-height:1.2; margin:0;}
+.k-sec {display:flex; align-items:center; gap:8px; margin:0 0 10px;}
+.k-bar {width:3px; height:15px; background:#2563EB; border-radius:2px; display:inline-block;}
+.k-sec-t {font-size:15px; font-weight:600;}
+.k-hero {background:#2563EB; border-radius:14px; padding:20px 22px; margin-bottom:6px;}
+.k-hero .lbl {font-size:12px; color:#BFD4FF; margin-bottom:7px;}
+.k-hero .num {font-size:28px; font-weight:700; color:#fff; line-height:1.05; letter-spacing:-0.01em;}
+.k-pill {display:inline-flex; align-items:center; gap:2px; font-size:11px; font-weight:600;
+         padding:2px 8px; border-radius:999px; margin-top:9px;}
+.k-up {background:rgba(255,255,255,0.18); color:#DCFCE7;}
+.k-dn {background:rgba(255,255,255,0.18); color:#FFE4E4;}
+.k-strip {margin-top:16px; padding-top:13px; border-top:1px solid rgba(255,255,255,0.18);
+          font-size:12px; color:#DCE8FF; display:flex; gap:20px; flex-wrap:wrap;}
+.k-strip b {color:#fff; font-weight:600;}
+table.k-tbl {width:100%; border-collapse:collapse; font-size:13px; color:inherit;}
+table.k-tbl th {background:rgba(37,99,235,0.07); color:#2563EB; padding:9px 12px; font-weight:600;}
+table.k-tbl td {padding:10px 12px; border-top:0.5px solid rgba(128,128,128,0.18);}
+table.k-tbl tr.tot td {border-top:1.5px solid rgba(37,99,235,0.35);
+          background:rgba(37,99,235,0.06); font-weight:700;}
+.k-dot {width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:7px; vertical-align:middle;}
+.k-wrap {border:0.5px solid rgba(128,128,128,0.22); border-radius:14px; overflow:hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -182,12 +207,60 @@ cur = agg(f)
 prev = agg(f_prev)
 
 # ========================================================
-#  통합 (크게)
+#  헤더
 # ========================================================
-st.markdown("### 📊 통합 (구글 + 메타)")
-st.caption(f"기간 {start} ~ {end}")
+period_txt = f"{start.strftime('%Y.%m.%d')} – {end.strftime('%m.%d')}"
+st.markdown(f"""
+<div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
+  <div>
+    <div class="k-tag">KORAS ROBOTICS · 광고 리포트</div>
+    <div class="k-h1">통합 광고 성과</div>
+  </div>
+  <div style="text-align:right; font-size:12px; color:rgba(128,128,128,0.95); line-height:1.6;">
+    <div>{period_txt}</div>
+    <div style="opacity:0.7;">전월 대비 · 구글 + 메타</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 
+# ========================================================
+#  통합 히어로 카드
+# ========================================================
+def pill(cur_v, prev_v):
+    if not prev_v:
+        return '<span class="k-pill k-up" style="opacity:0.7;">신규</span>'
+    pct = (cur_v - prev_v) / prev_v * 100
+    if pct >= 0:
+        return f'<span class="k-pill k-up">▲ {pct:.1f}%</span>'
+    return f'<span class="k-pill k-dn">▼ {abs(pct):.1f}%</span>'
+
+
+t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
+t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
+
+hero = f"""
+<div class="k-hero">
+  <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+    <div><div class="lbl">조회·도달</div><div class="num">{cur['views']:,}</div>{pill(cur['views'], prev['views'])}</div>
+    <div><div class="lbl">클릭수</div><div class="num">{cur['clicks']:,}</div>{pill(cur['clicks'], prev['clicks'])}</div>
+    <div><div class="lbl">전환수</div><div class="num">{cur['conversions']:,}</div>{pill(cur['conversions'], prev['conversions'])}</div>
+    <div><div class="lbl">노출수</div><div class="num">{cur['impressions']:,}</div>{pill(cur['impressions'], prev['impressions'])}</div>
+  </div>
+  <div class="k-strip">
+    <span>비용 <b>{cur['cost']:,.0f}원</b></span>
+    <span>CTR <b>{t_ctr:.2f}%</b></span>
+    <span>CPC <b>{t_cpc:,.0f}원</b></span>
+  </div>
+</div>
+"""
+st.markdown(hero, unsafe_allow_html=True)
+st.markdown('<div style="font-size:11px; color:rgba(128,128,128,0.8); margin:6px 0 18px;">※ \'조회·도달\'은 구글 조회수 + 메타 도달의 합이에요(성격이 다른 값이라 참고용).</div>', unsafe_allow_html=True)
+
+
+# ========================================================
+#  플랫폼별 상세 표
+# ========================================================
 def cells(d):
     a = agg(d)
     ctr = (a["clicks"] / a["impressions"] * 100) if a["impressions"] else 0
@@ -196,55 +269,37 @@ def cells(d):
             f"{a['impressions']:,}", f"{a['cost']:,.0f}원", f"{ctr:.2f}%", f"{cpc:,.0f}원"]
 
 
-# ----- 좌(통합 카드) / 우(플랫폼별 표) 2단 -----
-left, right = st.columns([1, 1.1], gap="large")
+st.markdown('<div class="k-sec"><span class="k-bar"></span><span class="k-sec-t">플랫폼별 상세</span></div>', unsafe_allow_html=True)
 
-with left:
-    m1, m2 = st.columns(2)
-    m1.metric("조회·도달", f"{cur['views']:,}", delta_str(cur["views"], prev["views"]))
-    m2.metric("클릭수", f"{cur['clicks']:,}", delta_str(cur["clicks"], prev["clicks"]))
-    m3, m4 = st.columns(2)
-    m3.metric("전환수", f"{cur['conversions']:,}", delta_str(cur["conversions"], prev["conversions"]))
-    m4.metric("노출수", f"{cur['impressions']:,}", delta_str(cur["impressions"], prev["impressions"]))
-    t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
-    t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
-    st.caption(f"비용 {cur['cost']:,.0f}원 · CTR {t_ctr:.2f}% · CPC {t_cpc:,.0f}원")
+headers = ["구분", "조회·도달", "클릭", "전환", "노출", "비용", "CTR", "CPC"]
+rows_def = [
+    ("구글", "#2563EB", cells(f[f["platform"] == "google"]), False),
+    ("메타", "#7AA5F5", cells(f[f["platform"] == "meta"]), False),
+    ("총계", None, cells(f), True),
+]
+html = '<div class="k-wrap"><table class="k-tbl"><thead><tr>'
+for i, h in enumerate(headers):
+    align = "left" if i == 0 else "right"
+    html += f"<th style='text-align:{align};'>{h}</th>"
+html += "</tr></thead><tbody>"
+for name, color, vals, is_total in rows_def:
+    cls = " class='tot'" if is_total else ""
+    dot = f"<span class='k-dot' style='background:{color};'></span>" if color else ""
+    html += f"<tr{cls}><td style='text-align:left;'>{dot}{name}</td>"
+    for v in vals:
+        html += f"<td style='text-align:right;'>{v}</td>"
+    html += "</tr>"
+html += "</tbody></table></div>"
+st.markdown(html, unsafe_allow_html=True)
 
-with right:
-    headers = ["구분", "조회·도달", "클릭", "전환", "노출", "비용", "CTR", "CPC"]
-    body = [
-        ("구글", cells(f[f["platform"] == "google"]), False),
-        ("메타", cells(f[f["platform"] == "meta"]), False),
-        ("총계", cells(f), True),
-    ]
-    bd = "border-bottom:0.5px solid rgba(128,128,128,0.25);"
-    html = "<table style='width:100%; border-collapse:collapse; font-size:12px; color:inherit;'>"
-    html += "<thead><tr style='color:rgba(128,128,128,0.95);'>"
-    for i, h in enumerate(headers):
-        align = "left" if i == 0 else "right"
-        html += f"<th style='padding:4px 6px; text-align:{align}; font-weight:500; {bd}'>{h}</th>"
-    html += "</tr></thead><tbody>"
-    for name, vals, is_total in body:
-        weight = "700" if is_total else "400"
-        top = "border-top:1.5px solid rgba(128,128,128,0.45);" if is_total else ""
-        html += f"<tr style='{top}'>"
-        html += f"<td style='padding:5px 6px; text-align:left; font-weight:{weight}; {bd}'>{name}</td>"
-        for v in vals:
-            html += f"<td style='padding:5px 6px; text-align:right; font-weight:{weight}; {bd}'>{v}</td>"
-        html += "</tr>"
-    html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
-
-st.caption("※ '조회·도달'은 구글 조회수 + 메타 도달의 합이에요(성격이 다른 값이라 참고용).")
-st.divider()
+st.markdown("<div style='height:18px;'></div>", unsafe_allow_html=True)
 
 # ========================================================
-#  그래프 (일별 추이 / 세로 막대)
+#  그래프
 # ========================================================
-st.markdown("#### 그래프")
-
 LABELS = {"views": "조회·도달", "clicks": "클릭수", "conversions": "전환수",
           "impressions": "노출수"}
+BLUE_SCHEME = ["#2563EB", "#7AA5F5", "#1E3A8A", "#9DBEF7"]
 
 plat_pick = st.radio("플랫폼", ["전체", "구글", "메타"], horizontal=True)
 if plat_pick == "구글":
@@ -260,7 +315,7 @@ else:
 if g.empty:
     st.info("선택한 조건에 데이터가 없어요.")
 else:
-    st.markdown("**일별 추이**")
+    st.markdown('<div class="k-sec" style="margin-top:6px;"><span class="k-bar"></span><span class="k-sec-t">일별 추이</span></div>', unsafe_allow_html=True)
     metric_keys = ["views", "clicks", "conversions", "impressions"]
     metric_labels = [LABELS[k] for k in metric_keys]
     chosen = st.multiselect("표시할 지표", metric_labels, default=metric_labels)
@@ -272,26 +327,27 @@ else:
         long["상대값"] = long.groupby("m")["값"].transform(
             lambda s: s / s.max() * 100 if s.max() else s * 0)
         line = (
-            alt.Chart(long).mark_line(point=True).encode(
+            alt.Chart(long).mark_line(point=True, strokeWidth=2.5).encode(
                 x=alt.X("date:T", title="날짜"),
                 y=alt.Y("상대값:Q", title="상대값 (지표별 최대=100)"),
-                color=alt.Color("지표:N", title="지표"),
+                color=alt.Color("지표:N", title="지표",
+                                scale=alt.Scale(range=BLUE_SCHEME)),
                 tooltip=["date:T", "지표:N", alt.Tooltip("값:Q", title="실제값", format=",.0f")],
-            ).properties(height=380)
+            ).properties(height=360)
         )
         st.altair_chart(line, width="stretch")
         st.caption("※ 지표마다 단위가 달라, 각 지표를 '자기 최대값=100' 기준으로 맞춰 그렸어요. 선에 마우스를 올리면 실제 숫자가 나와요.")
 
-    st.markdown(f"**{unit_label} 비교**")
+    st.markdown(f'<div class="k-sec" style="margin-top:8px;"><span class="k-bar"></span><span class="k-sec-t">{unit_label} 비교</span></div>', unsafe_allow_html=True)
     bar_label = st.selectbox("지표 선택", metric_labels, index=0)
     bcol = [k for k in metric_keys if LABELS[k] == bar_label][0]
     bar_df = g.groupby("campaign")[bcol].sum().reset_index().sort_values(bcol, ascending=False)
     bars = (
-        alt.Chart(bar_df).mark_bar().encode(
-            x=alt.X("campaign:N", sort="-y", title=None, axis=alt.Axis(labelAngle=-40)),
+        alt.Chart(bar_df).mark_bar(color=BLUE, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+            x=alt.X("campaign:N", sort="-y", title=None, axis=alt.Axis(labelAngle=-35)),
             y=alt.Y(f"{bcol}:Q", title=bar_label),
             tooltip=[alt.Tooltip("campaign:N", title="이름"),
                      alt.Tooltip(f"{bcol}:Q", title=bar_label, format=",.0f")],
-        ).properties(height=400)
+        ).properties(height=380)
     )
     st.altair_chart(bars, width="stretch")
