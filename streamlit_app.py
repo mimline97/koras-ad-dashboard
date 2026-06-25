@@ -6,6 +6,15 @@ import streamlit as st
 
 st.set_page_config(page_title="Koras 광고 대시보드", layout="wide")
 
+# ---- 여백 줄이기 + 통합 숫자 볼드 ----
+st.markdown("""
+<style>
+.block-container {padding-top: 2.2rem; padding-bottom: 2rem;}
+[data-testid="stMetricValue"] {font-weight: 700;}
+hr {margin: 0.7rem 0;}
+</style>
+""", unsafe_allow_html=True)
+
 START_DATE = st.secrets.get("GOOGLE_START_DATE", "2026-04-01")
 TODAY = datetime.date.today().isoformat()
 
@@ -78,12 +87,12 @@ def load_meta():
         FacebookAdsApi.init(access_token=token)
         account = AdAccount(f"act_{acct}")
         params = {
-            "level": "campaign",
+            "level": "adset",      # 광고세트 단위
             "time_range": {"since": START_DATE, "until": TODAY},
             "time_increment": 1,
         }
-        fields = ["campaign_name", "impressions", "clicks", "spend",
-                  "reach", "actions", "date_start"]
+        fields = ["campaign_name", "adset_name", "impressions", "clicks",
+                  "spend", "reach", "actions", "date_start"]
         rows = []
         for row in account.get_insights(fields=fields, params=params):
             link_click = 0
@@ -94,7 +103,8 @@ def load_meta():
             rows.append({
                 "date": str(row.get("date_start")),
                 "platform": "meta",
-                "campaign": row.get("campaign_name"),
+                # campaign 칸에 '광고세트명' (구글=캠페인 / 메타=광고세트)
+                "campaign": row.get("adset_name") or row.get("campaign_name"),
                 "impressions": int(row.get("impressions", 0) or 0),
                 "clicks": int(row.get("clicks", 0) or 0),
                 "views": int(row.get("reach", 0) or 0),
@@ -126,11 +136,9 @@ min_d = df["date"].min().date()
 max_d = df["date"].max().date()
 
 # ========================================================
-#  사이드바 (기간 / 새로고침)
+#  사이드바
 # ========================================================
 st.sidebar.title("Koras 광고")
-
-# 기본값 = 가장 최근 '달' (그래야 전월 대비가 자연스러움)
 default_start = max_d.replace(day=1)
 if default_start < min_d:
     default_start = min_d
@@ -144,10 +152,8 @@ else:
 if st.sidebar.button("🔄 데이터 새로고침"):
     st.cache_data.clear()
     st.rerun()
-
 st.sidebar.caption("전월 대비 = 선택 기간 vs 직전 같은 길이 기간")
 
-# ----- 기간 슬라이스 -----
 period_len = (end - start).days + 1
 prev_end = start - timedelta(days=1)
 prev_start = prev_end - timedelta(days=period_len - 1)
@@ -168,8 +174,7 @@ def agg(d):
 
 def delta_str(cur, prev):
     if prev and prev != 0:
-        pct = (cur - prev) / prev * 100
-        return f"{pct:+.1f}%"
+        return f"{(cur - prev) / prev * 100:+.1f}%"
     return None
 
 
@@ -196,39 +201,48 @@ st.caption("※ '조회·도달'은 구글 조회수 + 메타 도달의 합이�
 st.divider()
 
 # ========================================================
-#  플랫폼별 상세 표 (구글 / 메타 / 총계)
+#  플랫폼별 상세 표 (구글 / 메타 / 총계)  — 총계 볼드
 # ========================================================
 st.markdown("#### 플랫폼별 상세")
 
 
-def row_for(d, label):
+def cells(d):
     a = agg(d)
     ctr = (a["clicks"] / a["impressions"] * 100) if a["impressions"] else 0
     cpc = (a["cost"] / a["clicks"]) if a["clicks"] else 0
-    return {
-        "구분": label,
-        "조회·도달": f"{a['views']:,}",
-        "클릭": f"{a['clicks']:,}",
-        "전환": f"{a['conversions']:,}",
-        "노출": f"{a['impressions']:,}",
-        "비용": f"{a['cost']:,.0f}원",
-        "CTR": f"{ctr:.2f}%",
-        "CPC": f"{cpc:,.0f}원",
-    }
+    return [f"{a['views']:,}", f"{a['clicks']:,}", f"{a['conversions']:,}",
+            f"{a['impressions']:,}", f"{a['cost']:,.0f}원", f"{ctr:.2f}%", f"{cpc:,.0f}원"]
 
 
-table_rows = [
-    row_for(f[f["platform"] == "google"], "구글"),
-    row_for(f[f["platform"] == "meta"], "메타"),
-    row_for(f, "총계"),
+headers = ["구분", "조회·도달", "클릭", "전환", "노출", "비용", "CTR", "CPC"]
+body = [
+    ("구글", cells(f[f["platform"] == "google"]), False),
+    ("메타", cells(f[f["platform"] == "meta"]), False),
+    ("총계", cells(f), True),
 ]
-table_df = pd.DataFrame(table_rows)
-st.dataframe(table_df, width="stretch", hide_index=True)
+
+bd = "border-bottom:0.5px solid rgba(128,128,128,0.25);"
+html = "<table style='width:100%; border-collapse:collapse; font-size:14px; color:inherit;'>"
+html += "<thead><tr style='color:rgba(128,128,128,0.95); text-align:right;'>"
+for i, h in enumerate(headers):
+    align = "left" if i == 0 else "right"
+    html += f"<th style='padding:8px 10px; text-align:{align}; font-weight:500; {bd}'>{h}</th>"
+html += "</tr></thead><tbody>"
+for name, vals, is_total in body:
+    weight = "700" if is_total else "400"
+    top = "border-top:1.5px solid rgba(128,128,128,0.45);" if is_total else ""
+    html += f"<tr style='{top}'>"
+    html += f"<td style='padding:9px 10px; text-align:left; font-weight:{weight}; {bd}'>{name}</td>"
+    for v in vals:
+        html += f"<td style='padding:9px 10px; text-align:right; font-weight:{weight}; {bd}'>{v}</td>"
+    html += "</tr>"
+html += "</tbody></table>"
+st.markdown(html, unsafe_allow_html=True)
 
 st.divider()
 
 # ========================================================
-#  그래프 (일별 추이 / 캠페인별 비교)
+#  그래프 (일별 추이 / 세로 막대)
 # ========================================================
 st.markdown("#### 그래프")
 
@@ -238,10 +252,13 @@ LABELS = {"views": "조회·도달", "clicks": "클릭수", "conversions": "전�
 plat_pick = st.radio("플랫폼", ["전체", "구글", "메타"], horizontal=True)
 if plat_pick == "구글":
     g = f[f["platform"] == "google"]
+    unit_label = "캠페인별"
 elif plat_pick == "메타":
     g = f[f["platform"] == "meta"]
+    unit_label = "광고세트별"
 else:
     g = f
+    unit_label = "캠페인/광고세트별"
 
 if g.empty:
     st.info("선택한 조건에 데이터가 없어요.")
@@ -257,7 +274,7 @@ else:
         long["지표"] = long["m"].map(LABELS)
         long["상대값"] = long.groupby("m")["값"].transform(
             lambda s: s / s.max() * 100 if s.max() else s * 0)
-        chart = (
+        line = (
             alt.Chart(long).mark_line(point=True).encode(
                 x=alt.X("date:T", title="날짜"),
                 y=alt.Y("상대값:Q", title="상대값 (지표별 최대=100)"),
@@ -265,11 +282,19 @@ else:
                 tooltip=["date:T", "지표:N", alt.Tooltip("값:Q", title="실제값", format=",.0f")],
             ).properties(height=380)
         )
-        st.altair_chart(chart, width="stretch")
+        st.altair_chart(line, width="stretch")
         st.caption("※ 지표마다 단위가 달라, 각 지표를 '자기 최대값=100' 기준으로 맞춰 그렸어요. 선에 마우스를 올리면 실제 숫자가 나와요.")
 
-    st.markdown("**캠페인별 비교**")
+    st.markdown(f"**{unit_label} 비교**")
     bar_label = st.selectbox("지표 선택", metric_labels, index=0)
     bcol = [k for k in metric_keys if LABELS[k] == bar_label][0]
-    by_c = g.groupby("campaign")[bcol].sum().sort_values(ascending=True)
-    st.bar_chart(by_c, horizontal=True)
+    bar_df = g.groupby("campaign")[bcol].sum().reset_index().sort_values(bcol, ascending=False)
+    bars = (
+        alt.Chart(bar_df).mark_bar().encode(
+            x=alt.X("campaign:N", sort="-y", title=None, axis=alt.Axis(labelAngle=-40)),
+            y=alt.Y(f"{bcol}:Q", title=bar_label),
+            tooltip=[alt.Tooltip("campaign:N", title="이름"),
+                     alt.Tooltip(f"{bcol}:Q", title=bar_label, format=",.0f")],
+        ).properties(height=400)
+    )
+    st.altair_chart(bars, width="stretch")
