@@ -1,4 +1,5 @@
 import datetime
+from datetime import timedelta
 import pandas as pd
 import altair as alt
 import streamlit as st
@@ -96,7 +97,7 @@ def load_meta():
                 "campaign": row.get("campaign_name"),
                 "impressions": int(row.get("impressions", 0) or 0),
                 "clicks": int(row.get("clicks", 0) or 0),
-                "views": int(row.get("reach", 0) or 0),   # 메타는 도달
+                "views": int(row.get("reach", 0) or 0),
                 "cost": float(row.get("spend", 0) or 0),
                 "conversions": float(link_click),
             })
@@ -121,13 +122,19 @@ if df.empty:
     st.warning("데이터가 없습니다.")
     st.stop()
 
+min_d = df["date"].min().date()
+max_d = df["date"].max().date()
+
 # ========================================================
 #  사이드바 (기간 / 새로고침)
 # ========================================================
 st.sidebar.title("Koras 광고")
-min_d = df["date"].min().date()
-max_d = df["date"].max().date()
-date_range = st.sidebar.date_input("기간", value=(min_d, max_d),
+
+# 기본값 = 가장 최근 '달' (그래야 전월 대비가 자연스러움)
+default_start = max_d.replace(day=1)
+if default_start < min_d:
+    default_start = min_d
+date_range = st.sidebar.date_input("기간", value=(default_start, max_d),
                                    min_value=min_d, max_value=max_d)
 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     start, end = date_range
@@ -138,125 +145,131 @@ if st.sidebar.button("🔄 데이터 새로고침"):
     st.cache_data.clear()
     st.rerun()
 
-f_all = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)].copy()
+st.sidebar.caption("전월 대비 = 선택 기간 vs 직전 같은 길이 기간")
 
-LABELS = {"views": "조회수", "clicks": "클릭수", "conversions": "전환수",
-          "impressions": "노출수", "cost": "비용"}
+# ----- 기간 슬라이스 -----
+period_len = (end - start).days + 1
+prev_end = start - timedelta(days=1)
+prev_start = prev_end - timedelta(days=period_len - 1)
 
-
-def caption_line(d, show_cpm=True, show_conv=False):
-    cost = d["cost"].sum()
-    impr = int(d["impressions"].sum())
-    clk = int(d["clicks"].sum())
-    ctr = (clk / impr * 100) if impr else 0
-    cpc = (cost / clk) if clk else 0
-    parts = [f"비용 {cost:,.0f}원", f"CTR {ctr:.2f}%", f"CPC {cpc:,.0f}원"]
-    if show_cpm:
-        cpm = (cost / impr * 1000) if impr else 0
-        parts.append(f"CPM {cpm:,.0f}원")
-    parts.append(f"기간 {start} ~ {end}")
-    st.caption("   ·   ".join(parts))
+f = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)].copy()
+f_prev = df[(df["date"].dt.date >= prev_start) & (df["date"].dt.date <= prev_end)].copy()
 
 
-def trend_chart(d, metric_keys, metric_labels, key):
-    chosen = st.multiselect("표시할 지표", metric_labels, default=metric_labels, key=key)
-    if not chosen:
-        return
-    cols = [k for k, lab in zip(metric_keys, metric_labels) if lab in chosen]
-    daily = d.groupby("date")[cols].sum().reset_index()
-    long = daily.melt("date", var_name="m", value_name="값")
-    long["지표"] = long["m"].map(LABELS)
-    long["상대값"] = long.groupby("m")["값"].transform(
-        lambda s: s / s.max() * 100 if s.max() else s * 0)
-    chart = (
-        alt.Chart(long).mark_line(point=True).encode(
-            x=alt.X("date:T", title="날짜"),
-            y=alt.Y("상대값:Q", title="상대값 (지표별 최대=100)"),
-            color=alt.Color("지표:N", title="지표"),
-            tooltip=["date:T", "지표:N", alt.Tooltip("값:Q", title="실제값", format=",.0f")],
-        ).properties(height=380)
-    )
-    st.altair_chart(chart, width="stretch")
-    st.caption("※ 지표마다 단위가 달라, 각 지표를 '자기 최대값=100' 기준으로 맞춰 그렸어요. 선에 마우스를 올리면 실제 숫자가 나와요.")
+def agg(d):
+    return {
+        "views": int(d["views"].sum()),
+        "clicks": int(d["clicks"].sum()),
+        "conversions": int(round(d["conversions"].sum())),
+        "impressions": int(d["impressions"].sum()),
+        "cost": float(d["cost"].sum()),
+    }
 
 
-def campaign_bar(d, metric_keys, metric_labels, key):
-    label = st.selectbox("지표 선택", metric_labels, index=0, key=key)
-    col = [k for k, lab in zip(metric_keys, metric_labels) if lab == label][0]
-    by_c = d.groupby("campaign")[col].sum().sort_values(ascending=True)
+def delta_str(cur, prev):
+    if prev and prev != 0:
+        pct = (cur - prev) / prev * 100
+        return f"{pct:+.1f}%"
+    return None
+
+
+cur = agg(f)
+prev = agg(f_prev)
+
+# ========================================================
+#  통합 (크게)
+# ========================================================
+st.markdown("### 📊 통합 (구글 + 메타)")
+st.caption(f"기간 {start} ~ {end}")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("조회·도달", f"{cur['views']:,}", delta_str(cur["views"], prev["views"]))
+c2.metric("클릭수", f"{cur['clicks']:,}", delta_str(cur["clicks"], prev["clicks"]))
+c3.metric("전환수", f"{cur['conversions']:,}", delta_str(cur["conversions"], prev["conversions"]))
+c4.metric("노출수", f"{cur['impressions']:,}", delta_str(cur["impressions"], prev["impressions"]))
+
+t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
+t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
+st.caption(f"비용 {cur['cost']:,.0f}원   ·   CTR {t_ctr:.2f}%   ·   CPC {t_cpc:,.0f}원")
+st.caption("※ '조회·도달'은 구글 조회수 + 메타 도달의 합이에요(성격이 다른 값이라 참고용).")
+
+st.divider()
+
+# ========================================================
+#  플랫폼별 상세 표 (구글 / 메타 / 총계)
+# ========================================================
+st.markdown("#### 플랫폼별 상세")
+
+
+def row_for(d, label):
+    a = agg(d)
+    ctr = (a["clicks"] / a["impressions"] * 100) if a["impressions"] else 0
+    cpc = (a["cost"] / a["clicks"]) if a["clicks"] else 0
+    return {
+        "구분": label,
+        "조회·도달": f"{a['views']:,}",
+        "클릭": f"{a['clicks']:,}",
+        "전환": f"{a['conversions']:,}",
+        "노출": f"{a['impressions']:,}",
+        "비용": f"{a['cost']:,.0f}원",
+        "CTR": f"{ctr:.2f}%",
+        "CPC": f"{cpc:,.0f}원",
+    }
+
+
+table_rows = [
+    row_for(f[f["platform"] == "google"], "구글"),
+    row_for(f[f["platform"] == "meta"], "메타"),
+    row_for(f, "총계"),
+]
+table_df = pd.DataFrame(table_rows)
+st.dataframe(table_df, width="stretch", hide_index=True)
+
+st.divider()
+
+# ========================================================
+#  그래프 (일별 추이 / 캠페인별 비교)
+# ========================================================
+st.markdown("#### 그래프")
+
+LABELS = {"views": "조회·도달", "clicks": "클릭수", "conversions": "전환수",
+          "impressions": "노출수"}
+
+plat_pick = st.radio("플랫폼", ["전체", "구글", "메타"], horizontal=True)
+if plat_pick == "구글":
+    g = f[f["platform"] == "google"]
+elif plat_pick == "메타":
+    g = f[f["platform"] == "meta"]
+else:
+    g = f
+
+if g.empty:
+    st.info("선택한 조건에 데이터가 없어요.")
+else:
+    st.markdown("**일별 추이**")
+    metric_keys = ["views", "clicks", "conversions", "impressions"]
+    metric_labels = [LABELS[k] for k in metric_keys]
+    chosen = st.multiselect("표시할 지표", metric_labels, default=metric_labels)
+    if chosen:
+        cols = [k for k in metric_keys if LABELS[k] in chosen]
+        daily = g.groupby("date")[cols].sum().reset_index()
+        long = daily.melt("date", var_name="m", value_name="값")
+        long["지표"] = long["m"].map(LABELS)
+        long["상대값"] = long.groupby("m")["값"].transform(
+            lambda s: s / s.max() * 100 if s.max() else s * 0)
+        chart = (
+            alt.Chart(long).mark_line(point=True).encode(
+                x=alt.X("date:T", title="날짜"),
+                y=alt.Y("상대값:Q", title="상대값 (지표별 최대=100)"),
+                color=alt.Color("지표:N", title="지표"),
+                tooltip=["date:T", "지표:N", alt.Tooltip("값:Q", title="실제값", format=",.0f")],
+            ).properties(height=380)
+        )
+        st.altair_chart(chart, width="stretch")
+        st.caption("※ 지표마다 단위가 달라, 각 지표를 '자기 최대값=100' 기준으로 맞춰 그렸어요. 선에 마우스를 올리면 실제 숫자가 나와요.")
+
+    st.markdown("**캠페인별 비교**")
+    bar_label = st.selectbox("지표 선택", metric_labels, index=0)
+    bcol = [k for k in metric_keys if LABELS[k] == bar_label][0]
+    by_c = g.groupby("campaign")[bcol].sum().sort_values(ascending=True)
     st.bar_chart(by_c, horizontal=True)
-
-
-# ========================================================
-#  3구역 탭 (통합 / 구글 / 메타) + 원본
-# ========================================================
-tab_all, tab_g, tab_m, tab_raw = st.tabs(["📊 통합", "🔵 구글", "🟦 메타", "📄 원본"])
-
-# ---------- 통합 ----------
-with tab_all:
-    st.subheader("📊 통합 (구글 + 메타)")
-    d = f_all
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("조회·도달", f"{int(d['views'].sum()):,}")
-    c2.metric("클릭수", f"{int(d['clicks'].sum()):,}")
-    c3.metric("전환수", f"{d['conversions'].sum():,.0f}")
-    c4.metric("노출수", f"{int(d['impressions'].sum()):,}")
-    caption_line(d, show_cpm=False)
-    st.caption("※ 통합 '조회·도달'은 구글 조회수 + 메타 도달의 합이에요(성격이 다른 값이라 참고용).")
-    st.divider()
-    trend_chart(d, ["views", "clicks", "conversions", "impressions"],
-                ["조회수", "클릭수", "전환수", "노출수"], key="t_all")
-    st.divider()
-    st.subheader("캠페인별 비교")
-    campaign_bar(d, ["views", "clicks", "conversions", "impressions"],
-                 ["조회수", "클릭수", "전환수", "노출수"], key="b_all")
-
-# ---------- 구글 ----------
-with tab_g:
-    st.subheader("🔵 구글")
-    d = f_all[f_all["platform"] == "google"]
-    if d.empty:
-        st.info("선택 기간에 구글 데이터가 없어요.")
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("조회수 (TrueView)", f"{int(d['views'].sum()):,}")
-        c2.metric("클릭수", f"{int(d['clicks'].sum()):,}")
-        c3.metric("전환수", f"{d['conversions'].sum():,.0f}")
-        c4.metric("노출수", f"{int(d['impressions'].sum()):,}")
-        caption_line(d, show_cpm=True)
-        st.divider()
-        trend_chart(d, ["views", "clicks", "conversions", "impressions"],
-                    ["조회수", "클릭수", "전환수", "노출수"], key="t_g")
-        st.divider()
-        st.subheader("캠페인별 비교")
-        campaign_bar(d, ["views", "clicks", "conversions", "impressions"],
-                     ["조회수", "클릭수", "전환수", "노출수"], key="b_g")
-
-# ---------- 메타 ----------
-with tab_m:
-    st.subheader("🟦 메타")
-    d = f_all[f_all["platform"] == "meta"]
-    if d.empty:
-        st.info("선택 기간에 메타 데이터가 없어요.")
-    else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("도달", f"{int(d['views'].sum()):,}")
-        c2.metric("클릭수", f"{int(d['clicks'].sum()):,}")
-        c3.metric("노출수", f"{int(d['impressions'].sum()):,}")
-        caption_line(d, show_cpm=True)
-        st.caption("※ 도달은 '순 사용자 수'라 날짜별 합산 시 중복이 있을 수 있어요(추세 참고용).")
-        st.divider()
-        trend_chart(d, ["views", "clicks", "impressions"],
-                    ["도달", "클릭수", "노출수"], key="t_m")
-        st.divider()
-        st.subheader("캠페인별 비교")
-        campaign_bar(d, ["views", "clicks", "impressions"],
-                     ["도달", "클릭수", "노출수"], key="b_m")
-
-# ---------- 원본 ----------
-with tab_raw:
-    st.subheader("📄 원본 데이터")
-    st.caption(f"기간 {start} ~ {end}   ·   총 {len(f_all)}건")
-    show = f_all.sort_values("date", ascending=False).copy()
-    show["date"] = show["date"].dt.date
-    st.dataframe(show, width="stretch", hide_index=True)
