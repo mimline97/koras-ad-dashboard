@@ -263,6 +263,52 @@ def nv_keywords(since, until):
 
 
 # ========================================================
+#  채널 현황 (유튜브 구독자)
+# ========================================================
+YT_CHANNEL_ID = "UCbofDz8L4pyoBEjOEmM24GA"   # 코라스로보틱스
+
+
+@st.cache_data(ttl=3600)
+def yt_stats():
+    key = st.secrets.get("YOUTUBE_API_KEY")
+    if not key:
+        return None
+    try:
+        url = "https://www.googleapis.com/youtube/v3/channels?" + urllib.parse.urlencode(
+            {"part": "snippet,statistics", "id": YT_CHANNEL_ID, "key": key})
+        with urllib.request.urlopen(url, timeout=30) as r:
+            data = json.loads(r.read().decode())
+        items = data.get("items", [])
+        if not items:
+            return None
+        s = items[0]["statistics"]
+        return {"title": items[0]["snippet"]["title"],
+                "subs": int(s.get("subscriberCount", 0)),
+                "views": int(s.get("viewCount", 0)),
+                "videos": int(s.get("videoCount", 0))}
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600)
+def yt_history():
+    """youtube_subs.csv(시드+누적) 를 읽고, 오늘 값이 없으면 실시간 구독자수를 끝점으로 덧붙임."""
+    try:
+        h = pd.read_csv("youtube_subs.csv")
+        h["date"] = pd.to_datetime(h["date"])
+    except Exception:
+        h = pd.DataFrame(columns=["date", "subscribers"])
+    today = pd.Timestamp(datetime.date.today())
+    live = yt_stats()
+    if live and (h.empty or today not in set(h["date"])):
+        h = pd.concat([h, pd.DataFrame([{"date": today, "subscribers": live["subs"]}])],
+                      ignore_index=True)
+    h = h.dropna().sort_values("date")
+    h["subscribers"] = h["subscribers"].astype(int)
+    return h
+
+
+# ========================================================
 #  공통: 사이드바 (페이지 + 기간)
 # ========================================================
 df = load_sns()
@@ -273,7 +319,7 @@ min_d = df["date"].min().date()
 max_d = df["date"].max().date()
 
 st.sidebar.title("Koras 광고")
-page = st.sidebar.radio("페이지", ["📊 SNS · DA (유튜브 · 메타)", "🔍 검색광고 (네이버)"])
+page = st.sidebar.radio("페이지", ["📊 SNS · DA (유튜브 · 메타)", "🔍 검색광고 (네이버)", "📺 채널 현황"])
 st.sidebar.divider()
 
 default_start = max_d.replace(day=1)
@@ -426,7 +472,7 @@ if page.startswith("📊"):
 # ========================================================
 #  페이지 2 — 검색광고 (네이버)
 # ========================================================
-else:
+elif page.startswith("🔍"):
     st.markdown(f"""
     <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
       <div><div class="k-tag">KORAS ROBOTICS · 검색광고</div><div class="k-h1">검색광고(SA) 성과 · 네이버</div></div>
@@ -498,3 +544,61 @@ else:
                 "총비용": st.column_config.NumberColumn("총비용", format="%d원"),
             },
         )
+
+
+# ========================================================
+#  페이지 3 — 채널 현황 (유튜브 구독자)
+# ========================================================
+else:
+    st.markdown(f"""
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
+      <div><div class="k-tag">KORAS ROBOTICS · 채널 현황</div><div class="k-h1">유튜브 채널 성장</div></div>
+      <div style="text-align:right; font-size:12px; color:rgba(128,128,128,0.95); line-height:1.6;">
+        <div>{period_txt()}</div><div style="opacity:0.7;">구독자 추이</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    stats = yt_stats()
+    hist = yt_history()
+
+    if stats is None:
+        st.info("유튜브 키가 설정되지 않았어요. Streamlit Secrets에 YOUTUBE_API_KEY 를 추가하면 이 페이지가 켜져요.")
+        st.stop()
+
+    # 선택 기간 내 구독자 증감 (기간 시작값 대비 현재)
+    h_period = hist[(hist["date"].dt.date >= start) & (hist["date"].dt.date <= end)]
+    cur_subs = stats["subs"]
+    base_subs = int(h_period["subscribers"].iloc[0]) if not h_period.empty else cur_subs
+    diff = cur_subs - base_subs
+
+    def num_pill(diff):
+        if diff > 0:
+            return f'<span class="k-pill k-up" style="margin-top:0;">▲ {diff:,}명</span>'
+        if diff < 0:
+            return f'<span class="k-pill k-dn" style="margin-top:0;">▼ {abs(diff):,}명</span>'
+        return '<span class="k-pill k-up" style="margin-top:0; opacity:0.7;">변동 없음</span>'
+
+    st.markdown(f"""
+    <div class="k-hero"><div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+      <div class="k-cell"><div class="lbl">구독자 수</div><div class="num">{stats['subs']:,}</div>
+        <div style="margin-top:9px;">{num_pill(diff)} <span style="font-size:11px; color:rgba(128,128,128,0.9);">기간 내</span></div></div>
+      <div class="k-cell"><div class="lbl">총 조회수</div><div class="num">{stats['views']:,}</div></div>
+      <div class="k-cell"><div class="lbl">영상 수</div><div class="num">{stats['videos']:,}</div></div>
+    </div><div class="k-strip"><span>채널 <b>{stats['title']}</b></span><span>실시간 구독자 기준</span></div></div>
+    """, unsafe_allow_html=True)
+    st.markdown("<div style='height:18px;'></div>", unsafe_allow_html=True)
+
+    # 구독자 추이 차트 (선택 기간)
+    st.markdown('<div class="k-sec"><span class="k-bar"></span><span class="k-sec-t">구독자 추이</span></div>', unsafe_allow_html=True)
+    if h_period.empty:
+        st.info("선택 기간에 구독자 기록이 없어요. 기간을 넓혀보세요.")
+    else:
+        chart = (
+            alt.Chart(h_period).mark_line(point=True, strokeWidth=2.5, color=BLUE).encode(
+                x=alt.X("date:T", title="날짜"),
+                y=alt.Y("subscribers:Q", title="구독자 수", scale=alt.Scale(zero=False)),
+                tooltip=[alt.Tooltip("date:T", title="날짜"),
+                         alt.Tooltip("subscribers:Q", title="구독자", format=",.0f")],
+            ).properties(height=380)
+        )
+        st.altair_chart(chart, width="stretch")
+        st.caption("※ 6/25까지는 입력해둔 기록, 6/26부터는 매일 자동으로 쌓여요. (현재 구독자 수는 실시간)")
