@@ -316,13 +316,17 @@ if df.empty:
     st.warning("SNS/DA 데이터가 없습니다.")
     st.stop()
 min_d = df["date"].min().date()
-max_d = df["date"].max().date()
+data_max = df["date"].max().date()
+today_d = datetime.date.today()
+# 달력 최대 선택일 = 오늘 (데이터 마지막 날이 아니라). 날짜 바뀌면 자동으로 따라감.
+max_d = max(data_max, today_d)
 
 st.sidebar.title("Koras 광고")
 page = st.sidebar.radio("페이지", ["📊 SNS · DA (유튜브 · 메타)", "🔍 검색광고 (네이버)", "📺 채널 현황"])
 st.sidebar.divider()
 
-default_start = max_d.replace(day=1)
+# 기본 기간 = 이번 달 1일 ~ 오늘
+default_start = today_d.replace(day=1)
 if default_start < min_d:
     default_start = min_d
 date_range = st.sidebar.date_input("기간", value=(default_start, max_d),
