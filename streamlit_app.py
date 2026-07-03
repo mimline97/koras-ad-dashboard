@@ -370,6 +370,104 @@ def period_txt():
 
 
 # ========================================================
+#  엑셀 보고서 (시트 3개: SNS·DA / 검색광고 / 채널현황)
+# ========================================================
+def _sns_table(d):
+    """플랫폼별 상세 표 DataFrame (구글/메타/총계)."""
+    rows = []
+    for name, sub in [("구글", d[d["platform"] == "google"]),
+                      ("메타", d[d["platform"] == "meta"]),
+                      ("총계", d)]:
+        imp = int(sub["impressions"].sum()); clk = int(sub["clicks"].sum())
+        cost = float(sub["cost"].sum())
+        ctr = (clk / imp * 100) if imp else 0
+        cpc = (cost / clk) if clk else 0
+        rows.append({"구분": name, "조회·도달": int(sub["views"].sum()),
+                     "클릭": clk, "전환": int(round(sub["conversions"].sum())),
+                     "노출": imp, "비용(원)": round(cost),
+                     "CTR(%)": round(ctr, 2), "CPC(원)": round(cpc)})
+    return pd.DataFrame(rows)
+
+
+def build_excel_report():
+    import io
+    buf = io.BytesIO()
+    d = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)].copy()
+
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        # ---- 시트 1: SNS·DA ----
+        _sns_table(d).to_excel(writer, sheet_name="SNS·DA", index=False, startrow=1)
+        daily_sns = (d.groupby([d["date"].dt.date, "platform"])
+                     [["views", "clicks", "conversions", "impressions", "cost"]]
+                     .sum().reset_index())
+        daily_sns.columns = ["날짜", "플랫폼", "조회·도달", "클릭", "전환", "노출", "비용(원)"]
+        daily_sns.to_excel(writer, sheet_name="SNS·DA", index=False,
+                           startrow=len(_sns_table(d)) + 5)
+
+        # ---- 시트 2: 검색광고 (네이버) ----
+        if _naver_ready():
+            try:
+                kw = nv_keywords(start.isoformat(), end.isoformat())
+                nd = nv_daily(start.isoformat(), end.isoformat())
+                kw.sort_values("노출수", ascending=False).to_excel(
+                    writer, sheet_name="검색광고(네이버)", index=False, startrow=1)
+                if not nd.empty:
+                    nd2 = nd.copy()
+                    nd2["date"] = nd2["date"].dt.date
+                    nd2.columns = ["날짜", "노출", "클릭", "비용(원)"]
+                    nd2.to_excel(writer, sheet_name="검색광고(네이버)", index=False,
+                                 startrow=len(kw) + 5)
+            except Exception:
+                pd.DataFrame({"안내": ["네이버 데이터를 불러오지 못했어요."]}).to_excel(
+                    writer, sheet_name="검색광고(네이버)", index=False)
+        else:
+            pd.DataFrame({"안내": ["네이버 키가 설정되지 않았어요."]}).to_excel(
+                writer, sheet_name="검색광고(네이버)", index=False)
+
+        # ---- 시트 3: 채널현황 (유튜브 구독자) ----
+        try:
+            h = yt_history()
+            hp = h[(h["date"].dt.date >= start) & (h["date"].dt.date <= end)].copy()
+            hp["date"] = hp["date"].dt.date
+            hp.columns = ["날짜", "구독자수"]
+            hp.to_excel(writer, sheet_name="채널현황(유튜브)", index=False, startrow=1)
+        except Exception:
+            pd.DataFrame({"안내": ["유튜브 데이터를 불러오지 못했어요."]}).to_excel(
+                writer, sheet_name="채널현황(유튜브)", index=False)
+
+        # ---- 가벼운 서식: 제목 행 + 열 너비 ----
+        wb = writer.book
+        from openpyxl.styles import Font
+        titles = {"SNS·DA": f"SNS·DA 성과  ({start} ~ {end})",
+                  "검색광고(네이버)": f"검색광고(네이버) 키워드 성과  ({start} ~ {end})",
+                  "채널현황(유튜브)": f"유튜브 구독자 추이  ({start} ~ {end})"}
+        for name, ws in ((n, wb[n]) for n in wb.sheetnames):
+            if name in titles:
+                ws["A1"] = titles[name]
+                ws["A1"].font = Font(bold=True, size=13, color="2563EB")
+            for col in ws.columns:
+                width = max((len(str(c.value)) for c in col if c.value is not None), default=8)
+                ws.column_dimensions[col[0].column_letter].width = min(max(width + 4, 10), 30)
+
+    buf.seek(0)
+    return buf.getvalue()
+
+
+st.sidebar.divider()
+if st.sidebar.button("📥 엑셀 보고서 생성"):
+    with st.spinner("보고서 만드는 중…"):
+        st.session_state["xlsx_report"] = build_excel_report()
+if "xlsx_report" in st.session_state:
+    st.sidebar.download_button(
+        "⬇️ 엑셀 다운로드",
+        st.session_state["xlsx_report"],
+        file_name=f"koras_ad_report_{start}_{end}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    st.sidebar.caption("선택한 기간 기준 · 시트 3개 (SNS·DA / 검색광고 / 채널현황)")
+
+
+# ========================================================
 #  페이지 1 — SNS / DA
 # ========================================================
 if page.startswith("📊"):
