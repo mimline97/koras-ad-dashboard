@@ -3,3 +3,4 @@ pandas
 altair
 google-ads
 facebook-business
+openpyxl
