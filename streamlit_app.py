@@ -782,17 +782,16 @@ if page.startswith("🔎"):
 # ========================================================
 elif page.startswith("🏠"):
     today_dt = datetime.date.today()
-    week_start = today_dt - timedelta(days=today_dt.weekday())      # 이번 주 월요일
-    days_in = (today_dt - week_start).days                          # 이번 주 경과일
-    pw_start = week_start - timedelta(days=7)                       # 지난주 월요일
-    pw_end = pw_start + timedelta(days=days_in)                     # 지난주 같은 요일
+    week_start = today_dt - timedelta(days=6)                       # 최근 7일 (오늘 포함)
+    pw_end = week_start - timedelta(days=1)                         # 직전 7일
+    pw_start = pw_end - timedelta(days=6)
 
     st.markdown(f"""
     <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
       <div><div class="k-tag">KORAS ROBOTICS · 주간 보고</div><div class="k-h1">이번 주 성과 한눈에</div></div>
       <div style="text-align:right; font-size:12px; color:rgba(128,128,128,0.95); line-height:1.6;">
-        <div>{week_start.strftime('%m.%d')} – {today_dt.strftime('%m.%d')} (이번 주)</div>
-        <div style="opacity:0.7;">지난주 같은 기간 대비</div></div>
+        <div>{week_start.strftime('%m.%d')} – {today_dt.strftime('%m.%d')} (최근 7일)</div>
+        <div style="opacity:0.7;">직전 7일({pw_start.strftime('%m.%d')}–{pw_end.strftime('%m.%d')}) 대비</div></div>
     </div>""", unsafe_allow_html=True)
 
     # ---- 이번 주 / 지난주 데이터 ----
@@ -834,7 +833,7 @@ elif page.startswith("🏠"):
     # ---- 상단: 노출 총계 + 유튜브 구독자 + 총 조회수 ----
     st.markdown(f"""
     <div class="k-hero"><div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
-      <div class="k-cell"><div class="lbl">이번 주, 회사가 노출된 횟수</div><div class="num">{cur_imp:,}</div>{pill(cur_imp, prev_imp)}</div>
+      <div class="k-cell"><div class="lbl">최근 7일, 회사가 노출된 횟수</div><div class="num">{cur_imp:,}</div>{pill(cur_imp, prev_imp)}</div>
       <div class="k-cell"><div class="lbl">유튜브 구독자</div><div class="num">{subs_now:,}</div>{gain_pill(subs_week_gain)}</div>
       <div class="k-cell"><div class="lbl">유튜브 총 조회수 (누적)</div><div class="num">{total_views:,}</div></div>
     </div><div class="k-strip"><span>유튜브 · 메타 · 네이버 · 구글 검색광고 합산</span></div></div>
@@ -860,7 +859,7 @@ elif page.startswith("🏠"):
         ).properties(height=340, padding={"right": 28, "top": 28}), width="stretch")
 
     # ---- 하단: 광고로 만난 사람 (주간) ----
-    st.markdown('<div class="k-sec" style="margin-top:6px;"><span class="k-bar"></span><span class="k-sec-t">이번 주, 광고로 만난 사람</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="k-sec" style="margin-top:6px;"><span class="k-bar"></span><span class="k-sec-t">최근 7일, 광고로 만난 사람</span></div>', unsafe_allow_html=True)
     c1, c2 = st.columns([1, 2])
     with c1:
         st.markdown(f"""
@@ -869,7 +868,7 @@ elif page.startswith("🏠"):
           <div class="num">{cur_reach:,}</div>
           {pill(cur_reach, prev_reach)}
         </div></div>""", unsafe_allow_html=True)
-        st.caption("유튜브 영상 조회 + 메타(인스타·페이스북) 도달 합산 · 지난주 같은 기간 대비")
+        st.caption("유튜브 영상 조회 + 메타(인스타·페이스북) 도달 합산 · 직전 7일 대비")
     with c2:
         wk = cur_all[cur_all["platform"].isin(["google", "meta"])]
         if not wk.empty:
