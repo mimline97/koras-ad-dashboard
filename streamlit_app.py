@@ -69,14 +69,17 @@ def load_google():
     ga = client.get_service("GoogleAdsService")
     data = {}
     camp_q = f"""
-        SELECT segments.date, campaign.name, metrics.impressions,
-               metrics.clicks, metrics.cost_micros, metrics.conversions
+        SELECT segments.date, campaign.name, campaign.advertising_channel_type,
+               metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
         FROM campaign
         WHERE segments.date BETWEEN '{START_DATE}' AND '{TODAY}'
     """
+    ch_map = {}
     for batch in ga.search_stream(customer_id=customer_id, query=camp_q):
         for r in batch.results:
             key = (str(r.segments.date), r.campaign.name)
+            ch = str(r.campaign.advertising_channel_type)
+            ch_map[r.campaign.name] = "google_sa" if "SEARCH" in ch.upper() else "google"
             data[key] = {"impressions": int(r.metrics.impressions),
                          "clicks": int(r.metrics.clicks), "views": 0,
                          "cost": r.metrics.cost_micros / 1_000_000,
@@ -95,7 +98,8 @@ def load_google():
                 data[key]["views"] += int(r.metrics.video_trueview_views)
     except Exception:
         pass
-    rows = [{"date": d, "platform": "google", "campaign": c, **m} for (d, c), m in data.items()]
+    rows = [{"date": d, "platform": ch_map.get(c, "google"), "campaign": c, **m}
+            for (d, c), m in data.items()]
     return pd.DataFrame(rows)
 
 
@@ -322,7 +326,7 @@ today_d = datetime.date.today()
 max_d = max(data_max, today_d)
 
 st.sidebar.title("Koras 광고")
-page = st.sidebar.radio("페이지", ["📊 SNS · DA (유튜브 · 메타)", "🔍 검색광고 (네이버)", "📺 채널 현황"])
+page = st.sidebar.radio("페이지", ["🏠 총계 (주간 보고)", "📊 유튜브 · 메타", "🔍 네이버 검색광고", "🔎 구글 검색광고", "📺 채널 현황"])
 st.sidebar.divider()
 
 # 기본 기간 = 이번 달 1일 ~ 오늘
@@ -392,7 +396,8 @@ def _sns_table(d):
 def build_excel_report():
     import io
     buf = io.BytesIO()
-    d = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)].copy()
+    sns_only = df[df["platform"].isin(["google", "meta"])]
+    d = sns_only[(sns_only["date"].dt.date >= start) & (sns_only["date"].dt.date <= end)].copy()
 
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         # ---- 시트 1: SNS·DA ----
@@ -471,8 +476,9 @@ if "xlsx_report" in st.session_state:
 #  페이지 1 — SNS / DA
 # ========================================================
 if page.startswith("📊"):
-    f = df[(df["date"].dt.date >= start) & (df["date"].dt.date <= end)].copy()
-    f_prev = df[(df["date"].dt.date >= prev_start) & (df["date"].dt.date <= prev_end)].copy()
+    sns_df = df[df["platform"].isin(["google", "meta"])]
+    f = sns_df[(sns_df["date"].dt.date >= start) & (sns_df["date"].dt.date <= end)].copy()
+    f_prev = sns_df[(sns_df["date"].dt.date >= prev_start) & (sns_df["date"].dt.date <= prev_end)].copy()
 
     def agg(d):
         return {"views": int(d["views"].sum()), "clicks": int(d["clicks"].sum()),
@@ -651,7 +657,7 @@ elif page.startswith("🔍"):
 # ========================================================
 #  페이지 3 — 채널 현황 (유튜브 구독자)
 # ========================================================
-else:
+elif page.startswith("📺"):
     st.markdown(f"""
     <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
       <div><div class="k-tag">KORAS ROBOTICS · 채널 현황</div><div class="k-h1">유튜브 채널 성장</div></div>
@@ -704,3 +710,172 @@ else:
         )
         st.altair_chart(chart, width="stretch")
         st.caption("※ 6/25까지는 입력해둔 기록, 6/26부터는 매일 자동으로 쌓여요. (현재 구독자 수는 실시간)")
+
+
+# ========================================================
+#  페이지 — 🔎 구글 검색광고 (SA)
+# ========================================================
+if page.startswith("🔎"):
+    st.markdown(f"""
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
+      <div><div class="k-tag">KORAS ROBOTICS · 검색광고</div><div class="k-h1">검색광고(SA) 성과 · 구글</div></div>
+      <div style="text-align:right; font-size:12px; color:rgba(128,128,128,0.95); line-height:1.6;">
+        <div>{period_txt()}</div><div style="opacity:0.7;">직전 {period_len}일 대비 · 구글 검색</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    gsa = df[df["platform"] == "google_sa"]
+    g = gsa[(gsa["date"].dt.date >= start) & (gsa["date"].dt.date <= end)].copy()
+    g_prev = gsa[(gsa["date"].dt.date >= prev_start) & (gsa["date"].dt.date <= prev_end)].copy()
+
+    if g.empty:
+        st.info("선택 기간에 구글 검색광고 데이터가 없어요. (캠페인 집행 후 하루 이틀 지나면 잡혀요.)")
+    else:
+        def gagg(d):
+            return {"clicks": int(d["clicks"].sum()),
+                    "conversions": int(round(d["conversions"].sum())),
+                    "impressions": int(d["impressions"].sum()),
+                    "cost": float(d["cost"].sum())}
+        cur = gagg(g); prev = gagg(g_prev)
+        t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
+        t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
+        p_ctr = (prev["clicks"] / prev["impressions"] * 100) if prev["impressions"] else 0
+        p_cpc = (prev["cost"] / prev["clicks"]) if prev["clicks"] else 0
+
+        st.markdown(f"""
+        <div class="k-hero"><div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px;">
+          <div class="k-cell"><div class="lbl">노출수</div><div class="num">{cur['impressions']:,}</div>{pill(cur['impressions'], prev['impressions'])}</div>
+          <div class="k-cell"><div class="lbl">클릭수</div><div class="num">{cur['clicks']:,}</div>{pill(cur['clicks'], prev['clicks'])}</div>
+          <div class="k-cell"><div class="lbl">전환수</div><div class="num">{cur['conversions']:,}</div>{pill(cur['conversions'], prev['conversions'])}</div>
+          <div class="k-cell"><div class="lbl">평균 CPC</div><div class="num">{t_cpc:,.0f}<span style="font-size:15px;">원</span></div>{pill(t_cpc, p_cpc)}</div>
+        </div><div class="k-strip"><span>CTR <b>{t_ctr:.2f}%</b> {pilli(t_ctr, p_ctr)}</span><span>총비용 <b>{cur['cost']:,.0f}원</b> {pilli(cur['cost'], prev['cost'])}</span></div></div>
+        """, unsafe_allow_html=True)
+        st.markdown("<div style='height:18px;'></div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="k-sec"><span class="k-bar"></span><span class="k-sec-t">일별 추이 (노출수 · 클릭수)</span></div>', unsafe_allow_html=True)
+        GL = {"impressions": "노출수", "clicks": "클릭수"}
+        daily = g.groupby("date")[["impressions", "clicks"]].sum().reset_index()
+        long = daily.melt("date", var_name="m", value_name="값")
+        long["지표"] = long["m"].map(GL)
+        long["상대값"] = long.groupby("m")["값"].transform(lambda s: s / s.max() * 100 if s.max() else s * 0)
+        st.altair_chart(alt.Chart(long).mark_line(point=True, strokeWidth=2.5).encode(
+            x=alt.X("date:T", title="날짜"),
+            y=alt.Y("상대값:Q", title="상대값 (지표별 최대=100)"),
+            color=alt.Color("지표:N", title="지표", scale=alt.Scale(range=[BLUE, "#7AA5F5"])),
+            tooltip=["date:T", "지표:N", alt.Tooltip("값:Q", title="실제값", format=",.0f")],
+        ).properties(height=340), width="stretch")
+
+        st.markdown('<div class="k-sec" style="margin-top:8px;"><span class="k-bar"></span><span class="k-sec-t">캠페인별 비교</span></div>', unsafe_allow_html=True)
+        gl_labels = ["노출수", "클릭수", "전환수"]
+        gl_keys = {"노출수": "impressions", "클릭수": "clicks", "전환수": "conversions"}
+        bl = st.selectbox("지표 선택", gl_labels, index=0, key="gsa_bar")
+        bcol = gl_keys[bl]
+        bar_df = g.groupby("campaign")[bcol].sum().reset_index().sort_values(bcol, ascending=False)
+        st.altair_chart(alt.Chart(bar_df).mark_bar(color=BLUE, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+            x=alt.X("campaign:N", sort="-y", title=None, axis=alt.Axis(labelAngle=-35)),
+            y=alt.Y(f"{bcol}:Q", title=bl),
+            tooltip=[alt.Tooltip("campaign:N", title="캠페인"), alt.Tooltip(f"{bcol}:Q", title=bl, format=",.0f")],
+        ).properties(height=380), width="stretch")
+
+
+# ========================================================
+#  페이지 — 🏠 총계 (주간 보고, 메인)
+# ========================================================
+elif page.startswith("🏠"):
+    today_dt = datetime.date.today()
+    week_start = today_dt - timedelta(days=today_dt.weekday())      # 이번 주 월요일
+    days_in = (today_dt - week_start).days                          # 이번 주 경과일
+    pw_start = week_start - timedelta(days=7)                       # 지난주 월요일
+    pw_end = pw_start + timedelta(days=days_in)                     # 지난주 같은 요일
+
+    st.markdown(f"""
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px;">
+      <div><div class="k-tag">KORAS ROBOTICS · 주간 보고</div><div class="k-h1">이번 주 성과 한눈에</div></div>
+      <div style="text-align:right; font-size:12px; color:rgba(128,128,128,0.95); line-height:1.6;">
+        <div>{week_start.strftime('%m.%d')} – {today_dt.strftime('%m.%d')} (이번 주)</div>
+        <div style="opacity:0.7;">지난주 같은 기간 대비</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    # ---- 이번 주 / 지난주 데이터 ----
+    def week_slice(d, s, e):
+        return d[(d["date"].dt.date >= s) & (d["date"].dt.date <= e)]
+
+    cur_all = week_slice(df, week_start, today_dt)
+    prev_all = week_slice(df, pw_start, pw_end)
+
+    # 노출 총계 (유튜브+메타+구글SA + 네이버)
+    cur_imp = int(cur_all["impressions"].sum())
+    prev_imp = int(prev_all["impressions"].sum())
+    if _naver_ready():
+        try:
+            cur_imp += int(nv_summary(week_start.isoformat(), today_dt.isoformat())["impressions"])
+            prev_imp += int(nv_summary(pw_start.isoformat(), pw_end.isoformat())["impressions"])
+        except Exception:
+            pass
+
+    # 광고로 만난 사람 (구글 조회수 + 메타 도달)
+    cur_reach = int(cur_all[cur_all["platform"].isin(["google", "meta"])]["views"].sum())
+    prev_reach = int(prev_all[prev_all["platform"].isin(["google", "meta"])]["views"].sum())
+
+    # 유튜브 구독자 / 총 조회수
+    stats = yt_stats()
+    hist = yt_history()
+    subs_now = stats["subs"] if stats else 0
+    total_views = stats["views"] if stats else 0
+    hw = hist[(hist["date"].dt.date >= week_start) & (hist["date"].dt.date <= today_dt)]
+    subs_week_gain = (subs_now - int(hw["subscribers"].iloc[0])) if not hw.empty else 0
+
+    def gain_pill(diff, unit="명"):
+        if diff > 0:
+            return f'<span class="k-pill k-up">▲ {diff:,}{unit} 증가</span>'
+        if diff < 0:
+            return f'<span class="k-pill k-dn">▼ {abs(diff):,}{unit}</span>'
+        return '<span class="k-pill k-up" style="opacity:0.7;">변동 없음</span>'
+
+    # ---- 상단: 노출 총계 + 유튜브 구독자 + 총 조회수 ----
+    st.markdown(f"""
+    <div class="k-hero"><div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+      <div class="k-cell"><div class="lbl">이번 주, 회사가 노출된 횟수</div><div class="num">{cur_imp:,}</div>{pill(cur_imp, prev_imp)}</div>
+      <div class="k-cell"><div class="lbl">유튜브 구독자</div><div class="num">{subs_now:,}</div>{gain_pill(subs_week_gain)}</div>
+      <div class="k-cell"><div class="lbl">유튜브 총 조회수 (누적)</div><div class="num">{total_views:,}</div></div>
+    </div><div class="k-strip"><span>유튜브 · 메타 · 네이버 · 구글 검색광고 합산</span></div></div>
+    """, unsafe_allow_html=True)
+    st.markdown("<div style='height:18px;'></div>", unsafe_allow_html=True)
+
+    # ---- 구독자 성장 곡선 (크게, 전체 기간) ----
+    st.markdown('<div class="k-sec"><span class="k-bar"></span><span class="k-sec-t">유튜브 구독자 성장</span></div>', unsafe_allow_html=True)
+    if hist.empty:
+        st.info("구독자 기록이 아직 없어요.")
+    else:
+        st.altair_chart(alt.Chart(hist).mark_area(
+            line={"color": BLUE, "strokeWidth": 3},
+            color=alt.Gradient(gradient="linear",
+                               stops=[alt.GradientStop(color="#DBEAFE", offset=0),
+                                      alt.GradientStop(color="#2563EB", offset=1)],
+                               x1=1, x2=1, y1=1, y2=0),
+        ).encode(
+            x=alt.X("date:T", title=None, scale=alt.Scale(padding=20)),
+            y=alt.Y("subscribers:Q", title="구독자 수", scale=alt.Scale(zero=False)),
+            tooltip=[alt.Tooltip("date:T", title="날짜"),
+                     alt.Tooltip("subscribers:Q", title="구독자", format=",.0f")],
+        ).properties(height=340, padding={"right": 28, "top": 28}), width="stretch")
+
+    # ---- 하단: 광고로 만난 사람 (주간) ----
+    st.markdown('<div class="k-sec" style="margin-top:6px;"><span class="k-bar"></span><span class="k-sec-t">이번 주, 광고로 만난 사람</span></div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.markdown(f"""
+        <div class="k-hero" style="margin-bottom:0;"><div class="k-cell">
+          <div class="lbl">광고를 본 사람 수</div>
+          <div class="num">{cur_reach:,}</div>
+          {pill(cur_reach, prev_reach)}
+        </div></div>""", unsafe_allow_html=True)
+        st.caption("유튜브 영상 조회 + 메타(인스타·페이스북) 도달 합산 · 지난주 같은 기간 대비")
+    with c2:
+        wk = cur_all[cur_all["platform"].isin(["google", "meta"])]
+        if not wk.empty:
+            dv = wk.groupby("date")["views"].sum().reset_index()
+            st.altair_chart(alt.Chart(dv).mark_bar(color=BLUE, cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("views:Q", title="만난 사람"),
+                tooltip=[alt.Tooltip("date:T", title="날짜"), alt.Tooltip("views:Q", title="만난 사람", format=",.0f")],
+            ).properties(height=220), width="stretch")
