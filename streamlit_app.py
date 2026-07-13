@@ -78,8 +78,15 @@ def load_google():
     for batch in ga.search_stream(customer_id=customer_id, query=camp_q):
         for r in batch.results:
             key = (str(r.segments.date), r.campaign.name)
-            ch = str(r.campaign.advertising_channel_type)
-            ch_map[r.campaign.name] = "google_sa" if "SEARCH" in ch.upper() else "google"
+            try:
+                ch = r.campaign.advertising_channel_type.name   # enum 이름 (예: SEARCH, VIDEO)
+            except Exception:
+                try:
+                    ch = str(int(r.campaign.advertising_channel_type))  # 숫자 코드 fallback
+                except Exception:
+                    ch = ""
+            # SEARCH enum: 이름 "SEARCH" 또는 코드 2
+            ch_map[r.campaign.name] = "google_sa" if (ch == "SEARCH" or ch == "2") else "google"
             data[key] = {"impressions": int(r.metrics.impressions),
                          "clicks": int(r.metrics.clicks), "views": 0,
                          "cost": r.metrics.cost_micros / 1_000_000,
