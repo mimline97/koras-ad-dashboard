@@ -168,15 +168,22 @@ def _nv_get(path, query=None):
     cid = str(st.secrets["NAVER_CUSTOMER_ID"])
     key = st.secrets["NAVER_API_KEY"]
     secret = st.secrets["NAVER_SECRET_KEY"]
-    ts = str(int(time.time() * 1000))
     url = NV_BASE + path
     if query:
         url += "?" + urllib.parse.urlencode(query)
-    hdr = {"X-Timestamp": ts, "X-API-KEY": key, "X-Customer": cid,
-           "X-Signature": _nv_sign(secret, ts, "GET", path)}
-    req = urllib.request.Request(url, headers=hdr)
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read().decode())
+    last_err = None
+    for attempt in range(2):   # 네트워크 오류 시 1회 재시도
+        ts = str(int(time.time() * 1000))
+        hdr = {"X-Timestamp": ts, "X-API-KEY": key, "X-Customer": cid,
+               "X-Signature": _nv_sign(secret, ts, "GET", path)}
+        req = urllib.request.Request(url, headers=hdr)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.URLError as e:
+            last_err = e
+            time.sleep(1.5)
+    raise last_err
 
 
 def _chunks(lst, n):
@@ -602,11 +609,18 @@ elif page.startswith("🔍"):
     since, until = start.isoformat(), end.isoformat()
     p_since, p_until = prev_start.isoformat(), prev_end.isoformat()
 
-    with st.spinner("네이버 데이터를 불러오는 중…"):
-        cur = nv_summary(since, until)
-        prev = nv_summary(p_since, p_until)
-        daily = nv_daily(since, until)
-        kw = nv_keywords(since, until)
+    try:
+        with st.spinner("네이버 데이터를 불러오는 중…"):
+            cur = nv_summary(since, until)
+            prev = nv_summary(p_since, p_until)
+            daily = nv_daily(since, until)
+            kw = nv_keywords(since, until)
+    except Exception:
+        st.warning("네이버 서버 접속이 잠시 원활하지 않아요. 아래 '다시 시도'를 눌러주세요.")
+        if st.button("🔁 다시 시도"):
+            st.cache_data.clear()
+            st.rerun()
+        st.stop()
 
     t_ctr = (cur["clicks"] / cur["impressions"] * 100) if cur["impressions"] else 0
     t_cpc = (cur["cost"] / cur["clicks"]) if cur["clicks"] else 0
